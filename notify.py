@@ -22,7 +22,7 @@ AIRPORT = "HND"
 LATITUDE = "35.6726"
 LONGITUDE = "139.8171"
 OPEN_METEO_URL = (
-    f"https://api.open-meteo.com/v1/jma"
+    f"https://api.open-meteo.com/v1/forecast"
     f"?latitude={LATITUDE}&longitude={LONGITUDE}"
     f"&hourly=temperature_2m,precipitation_probability&past_days=1&timezone=Asia%2FTokyo"
 )
