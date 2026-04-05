@@ -84,8 +84,8 @@ def format_diff(today_temp, yesterday_temp) -> str:
     return "(昨日と同じ)"
 
 
-def build_message(coord_data: dict, temp_data: dict) -> str:
-    """Slack送信用メッセージを組み立てる"""
+def build_blocks(coord_data: dict, temp_data: dict) -> list:
+    """Slack Block Kit形式のメッセージを組み立てる"""
     now = datetime.now(JST)
     date_str = now.strftime("%-m月%-d日") + f"（{'月火水木金土日'[now.weekday()]}）"
 
@@ -108,12 +108,10 @@ def build_message(coord_data: dict, temp_data: dict) -> str:
     else:
         weather_emoji = "🌤️"
 
-    lines = [
-        f"{weather_emoji} *今日の天気｜{date_str}　江東区*",
-        "",
-        f"📝 {weather_text}",
-        f"🌡 {condition_text}",
-        "",
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"{weather_emoji} 今日の天気｜{date_str}　江東区"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"📝 {weather_text}\n🌡 {condition_text}"}},
+        {"type": "divider"},
     ]
 
     # 気温・降水確率（朝6時・昼12時・夜19時 + 昨日比）
@@ -121,7 +119,7 @@ def build_message(coord_data: dict, temp_data: dict) -> str:
     yesterday = temp_data.get("yesterday", {})
     temp_labels = [(6, "🌅  6時"), (12, "☀️ 12時"), (19, "🌙 19時")]
 
-    lines.append("*🌡 気温・降水確率（江東区）*")
+    temp_lines = ["*🌡 気温・降水確率（江東区）*"]
     for hour, label in temp_labels:
         td = today.get(hour, {})
         yd = yesterday.get(hour, {})
@@ -130,31 +128,52 @@ def build_message(coord_data: dict, temp_data: dict) -> str:
         y = yd.get("temp") if isinstance(yd, dict) else None
         if t is not None:
             diff_str = format_diff(t, y)
-            pop_str = f"☂ {pop}%" if pop is not None else ""
-            lines.append(f"　{label}:  {t:.1f}℃ {diff_str}　{pop_str}")
+            pop_str = f"　☂ {pop}%" if pop is not None else ""
+            temp_lines.append(f"　{label}:  {t:.1f}℃ {diff_str}{pop_str}")
         else:
-            lines.append(f"　{label}:  —")
-    lines.append("")
+            temp_lines.append(f"　{label}:  —")
 
-    # 時間帯ごとのコーデ提案（各1つずつ）
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(temp_lines)}})
+    blocks.append({"type": "divider"})
+
+    # 時間帯ごとのコーデ提案（画像付き）
     time_labels = [("a", "🌅 朝"), ("b", "☀️ 昼"), ("c", "🌙 夜")]
     for key, label in time_labels:
         coords = results.get(key, [])
-        if coords:
-            coord = coords[0]
-            lines.append(f"*{label}のコーデ*")
-            lines.append(f"👗 {coord.get('description3', '—')}")
-            image = coord.get("image", "")
-            if image:
-                lines.append(f"📷 {image}")
-            lines.append("")
+        if not coords:
+            continue
+        coord = coords[0]
+        desc = coord.get("description3", "—")
+        image = coord.get("image", "")
 
-    return "\n".join(lines)
+        if image:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{label}のコーデ*\n👗 {desc}"},
+                "accessory": {
+                    "type": "image",
+                    "image_url": image,
+                    "alt_text": f"{label}のコーデ",
+                },
+            })
+        else:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{label}のコーデ*\n👗 {desc}"},
+            })
+
+    return blocks
 
 
-def send_slack(text: str) -> None:
+def send_slack(text: str = "", blocks: list = None) -> None:
     """Slack Incoming Webhookにメッセージを送信する"""
-    payload = json.dumps({"text": text}).encode()
+    body = {}
+    if blocks:
+        body["blocks"] = blocks
+        body["text"] = text or "今日の天気・コーデ通知"
+    else:
+        body["text"] = text
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         SLACK_WEBHOOK_URL,
         data=payload,
@@ -186,8 +205,8 @@ def main() -> None:
     try:
         coord_data = fetch_coords()
         temp_data = fetch_weather_data()
-        message = build_message(coord_data, temp_data)
-        send_slack(message)
+        blocks = build_blocks(coord_data, temp_data)
+        send_slack(blocks=blocks)
         print("通知送信完了 ✅")
     except Exception as e:
         print(f"ERROR: {e}")
