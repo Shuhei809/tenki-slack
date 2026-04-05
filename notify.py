@@ -14,16 +14,16 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 # TNQL Coords Trial V2 (RapidAPI)
 TNQL_HOST = "tnql-coords-trial-v2.p.rapidapi.com"
-TNQL_ENDPOINT = f"https://{TNQL_HOST}/v2/coords"
-# 豊洲エリアの緯度経度
-LATITUDE = "35.6496"
-LONGITUDE = "139.7963"
+TNQL_ENDPOINT = f"https://{TNQL_HOST}/v2/api/coords_trial"
+# 成田空港（東京エリア）
+AIRPORT = "NRT"
 
 
 def fetch_weather() -> dict:
     """TNQL APIから天気・コーデ情報を取得する"""
-    url = f"{TNQL_ENDPOINT}?lat={LATITUDE}&lng={LONGITUDE}"
+    url = f"{TNQL_ENDPOINT}?airport={AIRPORT}"
     req = urllib.request.Request(url, headers={
+        "Content-Type": "application/json",
         "x-rapidapi-key": TNQL_API_KEY,
         "x-rapidapi-host": TNQL_HOST,
     })
@@ -127,6 +127,7 @@ def main() -> None:
 
     try:
         data = fetch_weather()
+        print("API Response:", json.dumps(data, ensure_ascii=False, indent=2))
         message = build_message(data)
         send_slack(message)
         print("通知送信完了 ✅")
