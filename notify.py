@@ -15,12 +15,24 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 # TNQL Coords Trial V2 (RapidAPI)
 TNQL_HOST = "tnql-coords-trial-v2.p.rapidapi.com"
 TNQL_ENDPOINT = f"https://{TNQL_HOST}/v2/api/coords_trial"
-# 成田空港（東京エリア）
-AIRPORT = "NRT"
+# 羽田空港（江東区最寄り）
+AIRPORT = "HND"
+
+# Open-Meteo API（気温データ用・江東区）
+LATITUDE = "35.6726"
+LONGITUDE = "139.8171"
+OPEN_METEO_URL = (
+    f"https://api.open-meteo.com/v1/jma"
+    f"?latitude={LATITUDE}&longitude={LONGITUDE}"
+    f"&hourly=temperature_2m&past_days=1&timezone=Asia%2FTokyo"
+)
+
+# 気温を取得する時刻（JST）
+TEMP_HOURS = [6, 12, 19]
 
 
-def fetch_weather() -> dict:
-    """TNQL APIから天気・コーデ情報を取得する"""
+def fetch_coords() -> dict:
+    """TNQL APIからコーデ情報を取得する"""
     url = f"{TNQL_ENDPOINT}?airport={AIRPORT}"
     req = urllib.request.Request(url, headers={
         "Content-Type": "application/json",
@@ -31,12 +43,51 @@ def fetch_weather() -> dict:
         return json.loads(resp.read().decode())
 
 
-def build_message(data: dict) -> str:
+def fetch_temperatures() -> dict:
+    """Open-Meteo APIから今日・昨日の気温を取得する"""
+    req = urllib.request.Request(OPEN_METEO_URL)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode())
+
+    hourly = data["hourly"]
+    times = hourly["time"]           # "2026-04-04T00:00", ...
+    temps = hourly["temperature_2m"]
+
+    now = datetime.now(JST)
+    today_str = now.strftime("%Y-%m-%d")
+    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    result = {"today": {}, "yesterday": {}}
+    for t, temp in zip(times, temps):
+        date_part, time_part = t.split("T")
+        hour = int(time_part.split(":")[0])
+        if hour in TEMP_HOURS and temp is not None:
+            if date_part == today_str:
+                result["today"][hour] = temp
+            elif date_part == yesterday_str:
+                result["yesterday"][hour] = temp
+
+    return result
+
+
+def format_diff(today_temp, yesterday_temp) -> str:
+    """昨日との気温差を文字列にする"""
+    if today_temp is None or yesterday_temp is None:
+        return ""
+    diff = today_temp - yesterday_temp
+    if diff > 0:
+        return f"(昨日比 +{diff:.1f}℃)"
+    elif diff < 0:
+        return f"(昨日比 {diff:.1f}℃)"
+    return "(昨日と同じ)"
+
+
+def build_message(coord_data: dict, temp_data: dict) -> str:
     """Slack送信用メッセージを組み立てる"""
     now = datetime.now(JST)
     date_str = now.strftime("%-m月%-d日") + f"（{'月火水木金土日'[now.weekday()]}）"
 
-    results = data.get("results", {})
+    results = coord_data.get("results", {})
 
     # 朝(a)の最初のコーデから天気情報を取得
     morning = results.get("a", [{}])[0] if results.get("a") else {}
@@ -56,12 +107,28 @@ def build_message(data: dict) -> str:
         weather_emoji = "🌤️"
 
     lines = [
-        f"{weather_emoji} *今日の天気｜{date_str}*",
+        f"{weather_emoji} *今日の天気｜{date_str}　江東区*",
         "",
         f"📝 {weather_text}",
         f"🌡 {condition_text}",
         "",
     ]
+
+    # 気温情報（朝6時・昼12時・夜19時 + 昨日比）
+    today = temp_data.get("today", {})
+    yesterday = temp_data.get("yesterday", {})
+    temp_labels = [(6, "🌅  6時"), (12, "☀️ 12時"), (19, "🌙 19時")]
+
+    lines.append("*🌡 気温（江東区）*")
+    for hour, label in temp_labels:
+        t = today.get(hour)
+        y = yesterday.get(hour)
+        if t is not None:
+            diff_str = format_diff(t, y)
+            lines.append(f"　{label}:  {t:.1f}℃  {diff_str}")
+        else:
+            lines.append(f"　{label}:  —")
+    lines.append("")
 
     # 時間帯ごとのコーデ提案（各1つずつ）
     time_labels = [("a", "🌅 朝"), ("b", "☀️ 昼"), ("c", "🌙 夜")]
@@ -111,8 +178,9 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        data = fetch_weather()
-        message = build_message(data)
+        coord_data = fetch_coords()
+        temp_data = fetch_temperatures()
+        message = build_message(coord_data, temp_data)
         send_slack(message)
         print("通知送信完了 ✅")
     except Exception as e:
