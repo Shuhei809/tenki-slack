@@ -36,61 +36,46 @@ def build_message(data: dict) -> str:
     now = datetime.now(JST)
     date_str = now.strftime("%-m月%-d日") + f"（{'月火水木金土日'[now.weekday()]}）"
 
-    # レスポンス構造に合わせて柔軟に取得
-    weather = data.get("weather", data)
-    temp = weather.get("temp", "—")
-    feels_like = weather.get("feels_like", weather.get("apparent_temp", "—"))
-    humidity = weather.get("humidity", "—")
-    pop = weather.get("pop", weather.get("precipitation_probability", "—"))
-    description = weather.get("description", weather.get("text", "—"))
+    results = data.get("results", {})
+
+    # 朝(a)の最初のコーデから天気情報を取得
+    morning = results.get("a", [{}])[0] if results.get("a") else {}
+    weather_text = morning.get("description1", "—")
+    condition_text = morning.get("description2", "—")
 
     # 天気に合った絵文字
-    desc_str = str(description)
-    if "晴" in desc_str:
+    if "晴" in weather_text:
         weather_emoji = "☀️"
-    elif "曇" in desc_str:
+    elif "曇" in weather_text:
         weather_emoji = "☁️"
-    elif "雨" in desc_str:
+    elif "雨" in weather_text:
         weather_emoji = "🌧️"
-    elif "雪" in desc_str:
+    elif "雪" in weather_text:
         weather_emoji = "❄️"
     else:
         weather_emoji = "🌤️"
 
-    # コーデ情報の取得
-    coord = data.get("coordinates", data.get("coords", data.get("coordinate", {})))
-    if isinstance(coord, list) and coord:
-        coord = coord[0]
-    coord_text = ""
-    if isinstance(coord, dict):
-        items = []
-        for key in ("tops", "bottoms", "outer", "inner", "shoes", "accessory", "items"):
-            val = coord.get(key)
-            if val:
-                items.append(str(val) if not isinstance(val, list) else "、".join(str(v) for v in val))
-        coord_text = "\n".join(items) if items else json.dumps(coord, ensure_ascii=False, indent=2)
-    elif isinstance(coord, str):
-        coord_text = coord
-    else:
-        # coordsが取れない場合はdata全体からそれらしいキーを探す
-        for key in ("suggestion", "advice", "outfit", "style"):
-            if key in data:
-                coord_text = str(data[key])
-                break
-        if not coord_text:
-            coord_text = "コーデ情報を取得できませんでした"
-
     lines = [
         f"{weather_emoji} *今日の天気｜{date_str}*",
         "",
-        f"🌡 気温: {temp}℃ / 体感 {feels_like}℃",
-        f"💧 湿度: {humidity}%",
-        f"🌂 降水確率: {pop}%",
-        f"📝 天気: {description}",
+        f"📝 {weather_text}",
+        f"🌡 {condition_text}",
         "",
-        "👗 *今日のコーデ提案*",
-        f"→ {coord_text}",
     ]
+
+    # 時間帯ごとのコーデ提案（各1つずつ）
+    time_labels = [("a", "🌅 朝"), ("b", "☀️ 昼"), ("c", "🌙 夜")]
+    for key, label in time_labels:
+        coords = results.get(key, [])
+        if coords:
+            coord = coords[0]
+            lines.append(f"*{label}のコーデ*")
+            lines.append(f"👗 {coord.get('description3', '—')}")
+            image = coord.get("image", "")
+            if image:
+                lines.append(f"📷 {image}")
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -127,7 +112,6 @@ def main() -> None:
 
     try:
         data = fetch_weather()
-        print("API Response:", json.dumps(data, ensure_ascii=False, indent=2))
         message = build_message(data)
         send_slack(message)
         print("通知送信完了 ✅")
