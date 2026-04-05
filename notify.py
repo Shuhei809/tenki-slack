@@ -24,7 +24,7 @@ LONGITUDE = "139.8171"
 OPEN_METEO_URL = (
     f"https://api.open-meteo.com/v1/jma"
     f"?latitude={LATITUDE}&longitude={LONGITUDE}"
-    f"&hourly=temperature_2m&past_days=1&timezone=Asia%2FTokyo"
+    f"&hourly=temperature_2m,precipitation_probability&past_days=1&timezone=Asia%2FTokyo"
 )
 
 # 気温を取得する時刻（JST）
@@ -43,8 +43,8 @@ def fetch_coords() -> dict:
         return json.loads(resp.read().decode())
 
 
-def fetch_temperatures() -> dict:
-    """Open-Meteo APIから今日・昨日の気温を取得する"""
+def fetch_weather_data() -> dict:
+    """Open-Meteo APIから今日・昨日の気温・降水確率を取得する"""
     req = urllib.request.Request(OPEN_METEO_URL)
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read().decode())
@@ -52,20 +52,22 @@ def fetch_temperatures() -> dict:
     hourly = data["hourly"]
     times = hourly["time"]           # "2026-04-04T00:00", ...
     temps = hourly["temperature_2m"]
+    precip = hourly.get("precipitation_probability", [None] * len(times))
 
     now = datetime.now(JST)
     today_str = now.strftime("%Y-%m-%d")
     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
     result = {"today": {}, "yesterday": {}}
-    for t, temp in zip(times, temps):
+    for t, temp, pop in zip(times, temps, precip):
         date_part, time_part = t.split("T")
         hour = int(time_part.split(":")[0])
-        if hour in TEMP_HOURS and temp is not None:
+        if hour in TEMP_HOURS:
+            entry = {"temp": temp, "pop": pop}
             if date_part == today_str:
-                result["today"][hour] = temp
+                result["today"][hour] = entry
             elif date_part == yesterday_str:
-                result["yesterday"][hour] = temp
+                result["yesterday"][hour] = entry
 
     return result
 
@@ -114,18 +116,22 @@ def build_message(coord_data: dict, temp_data: dict) -> str:
         "",
     ]
 
-    # 気温情報（朝6時・昼12時・夜19時 + 昨日比）
+    # 気温・降水確率（朝6時・昼12時・夜19時 + 昨日比）
     today = temp_data.get("today", {})
     yesterday = temp_data.get("yesterday", {})
     temp_labels = [(6, "🌅  6時"), (12, "☀️ 12時"), (19, "🌙 19時")]
 
-    lines.append("*🌡 気温（江東区）*")
+    lines.append("*🌡 気温・降水確率（江東区）*")
     for hour, label in temp_labels:
-        t = today.get(hour)
-        y = yesterday.get(hour)
+        td = today.get(hour, {})
+        yd = yesterday.get(hour, {})
+        t = td.get("temp") if isinstance(td, dict) else None
+        pop = td.get("pop") if isinstance(td, dict) else None
+        y = yd.get("temp") if isinstance(yd, dict) else None
         if t is not None:
             diff_str = format_diff(t, y)
-            lines.append(f"　{label}:  {t:.1f}℃  {diff_str}")
+            pop_str = f"☂ {pop}%" if pop is not None else ""
+            lines.append(f"　{label}:  {t:.1f}℃ {diff_str}　{pop_str}")
         else:
             lines.append(f"　{label}:  —")
     lines.append("")
@@ -179,7 +185,7 @@ def main() -> None:
 
     try:
         coord_data = fetch_coords()
-        temp_data = fetch_temperatures()
+        temp_data = fetch_weather_data()
         message = build_message(coord_data, temp_data)
         send_slack(message)
         print("通知送信完了 ✅")
