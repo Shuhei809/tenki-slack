@@ -113,7 +113,7 @@ def build_blocks(coord_data: dict, temp_data: dict) -> list:
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"{weather_emoji} 今日の天気｜{date_str}　江東区"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"<@{MENTION_USER_ID}> おはよう！"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<@{MENTION_USER_ID}>"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"📝 {weather_text}\n🌡 {condition_text}"}},
         {"type": "divider"},
     ]
