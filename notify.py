@@ -30,6 +30,9 @@ OPEN_METEO_URL = (
 # 気温を取得する時刻（JST）
 TEMP_HOURS = [6, 12, 19]
 
+# 通知時にメンションするSlackユーザーID
+MENTION_USER_ID = "U091DT4HS4T"
+
 
 def fetch_coords() -> dict:
     """TNQL APIからコーデ情報を取得する"""
@@ -110,6 +113,7 @@ def build_blocks(coord_data: dict, temp_data: dict) -> list:
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"{weather_emoji} 今日の天気｜{date_str}　江東区"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<@{MENTION_USER_ID}> おはよう！"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"📝 {weather_text}\n🌡 {condition_text}"}},
         {"type": "divider"},
     ]
